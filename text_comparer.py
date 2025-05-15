@@ -7,7 +7,7 @@ class TextComparerApp:
     def __init__(self, master):
         self.master = master
         master.title("Text Difference Finder")
-        master.geometry("700x600") # Increased height a bit for the new button
+        master.geometry("700x650") # Increased height for the new button
 
         self.bilingual_file_path = tk.StringVar()
         self.english_file_path = tk.StringVar()
@@ -33,12 +33,14 @@ class TextComparerApp:
 
         tk.Button(action_frame, text="Compare English Words", command=self._compare_texts, pady=5).pack(side=tk.LEFT, padx=5)
         tk.Button(action_frame, text="Compare Punctuation", command=self._compare_punctuation, pady=5).pack(side=tk.LEFT, padx=5)
-
+        tk.Button(action_frame, text="Tag Paragraphs", command=self._tag_paragraphs, pady=5).pack(side=tk.LEFT, padx=5) # New button
 
         # --- Results Display ---
-        tk.Label(master, text="Comparison Results:").pack()
+        tk.Label(master, text="Comparison Results / Log:").pack() # Changed label slightly
         self.results_text = scrolledtext.ScrolledText(master, wrap=tk.WORD, height=20, width=80)
         self.results_text.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+        
+        self._preload_file_paths() # Preload after all UI elements are defined
 
     def _preload_file_paths(self):
         bilingual_default = "BilingualText.txt"
@@ -80,10 +82,10 @@ class TextComparerApp:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 all_lines = f.readlines()
-                content_lines = [line.rstrip('\n') for line in all_lines if line.strip()] # Keep original line endings for now
+                content_lines = [line.rstrip('\n') for line in all_lines if line.strip()]
                 for i in range(0, len(content_lines), 2):
                     english_lines_extracted.append(content_lines[i])
-            return "\n".join(english_lines_extracted) # Join with \n to preserve line structure for punctuation analysis
+            return "\n".join(english_lines_extracted)
         except Exception as e:
             messagebox.showerror("Error Reading Bilingual File", f"Could not read or parse bilingual file: {e}")
             return None
@@ -105,16 +107,10 @@ class TextComparerApp:
         return words
 
     def _extract_punctuation_with_location(self, text, text_source_name="Unknown"):
-        """
-        Extracts all punctuation marks from the text with their line and char positions.
-        Returns a list of tuples: (punctuation_char, line_number, char_pos_in_line)
-        Line and char positions are 1-based.
-        """
         if not text:
             return []
-
         punctuation_marks = []
-        lines = text.splitlines() # Preserves line structure
+        lines = text.splitlines() 
         for line_idx, line_content in enumerate(lines):
             for char_idx, char in enumerate(line_content):
                 if char in string.punctuation:
@@ -123,7 +119,6 @@ class TextComparerApp:
 
     def _compare_texts(self):
         self.results_text.delete('1.0', tk.END)
-
         bilingual_path = self.bilingual_file_path.get()
         english_path = self.english_file_path.get()
 
@@ -131,16 +126,13 @@ class TextComparerApp:
             messagebox.showwarning("Input Missing", "Please select both text files.")
             return
 
-        # For word comparison, we still join with spaces after extraction to make it one sequence
         extracted_bilingual_eng_raw_lines = self._extract_english_from_bilingual(bilingual_path)
         if extracted_bilingual_eng_raw_lines is None: return
         extracted_bilingual_eng_for_words = extracted_bilingual_eng_raw_lines.replace('\n', ' ')
 
-
         pure_english_text_raw = self._read_english_text(english_path)
         if pure_english_text_raw is None: return
         pure_english_text_for_words = pure_english_text_raw.replace('\n', ' ')
-
 
         bilingual_words = self._tokenize_and_clean_text(extracted_bilingual_eng_for_words)
         english_words = self._tokenize_and_clean_text(pure_english_text_for_words)
@@ -166,7 +158,7 @@ class TextComparerApp:
             word_b = bilingual_words[i] if i < len(bilingual_words) else "<END_OF_BILINGUAL_EXTRACT>"
             word_e = english_words[i] if i < len(english_words) else "<END_OF_ENGLISHTEXT>"
 
-            if word_b.lower() != word_e.lower(): # Case-insensitive comparison for words
+            if word_b.lower() != word_e.lower():
                 differences_found = True
                 self.results_text.insert(tk.END, f"Difference at word index {i}:\n")
                 self.results_text.insert(tk.END, f"  Bilingual Extracted: '{word_b}'\n")
@@ -183,7 +175,6 @@ class TextComparerApp:
 
     def _compare_punctuation(self):
         self.results_text.delete('1.0', tk.END)
-
         bilingual_path = self.bilingual_file_path.get()
         english_path = self.english_file_path.get()
 
@@ -191,14 +182,12 @@ class TextComparerApp:
             messagebox.showwarning("Input Missing", "Please select both text files.")
             return
 
-        # Get raw English content (with newlines preserved from extraction for bilingual)
         extracted_bilingual_eng_raw = self._extract_english_from_bilingual(bilingual_path)
         if extracted_bilingual_eng_raw is None: return
 
         pure_english_text_raw = self._read_english_text(english_path)
         if pure_english_text_raw is None: return
 
-        # Extract punctuation sequences with locations
         puncts_bilingual = self._extract_punctuation_with_location(extracted_bilingual_eng_raw, "Bilingual Extract")
         puncts_english = self._extract_punctuation_with_location(pure_english_text_raw, "EnglishText.txt")
 
@@ -218,21 +207,18 @@ class TextComparerApp:
             if i < len(puncts_bilingual):
                 p_b_char, p_b_line, p_b_col = puncts_bilingual[i]
             else:
-                diff_type = "EnglishText has fewer punctuation marks."
+                diff_type = "EnglishText.txt has fewer punctuation marks."
 
             if i < len(puncts_english):
                 p_e_char, p_e_line, p_e_col = puncts_english[i]
             else:
                 diff_type = "Bilingual Extract has fewer punctuation marks."
-
+            
             if p_b_char is not None and p_e_char is not None:
                 if p_b_char != p_e_char:
                     diff_type = "Punctuation characters differ."
-                # Optional: Could also check if p_b_line != p_e_line or p_b_col != p_e_col
-                # and report as "Same punctuation, different location" if chars are same.
-                # For now, focusing on differing characters or missing ones.
             
-            if diff_type: # If there's any kind of mismatch (char, or one is missing)
+            if diff_type: 
                 differences_found = True
                 self.results_text.insert(tk.END, f"Difference in punctuation sequence at occurrence #{i+1}:\n")
                 if p_b_char is not None:
@@ -246,40 +232,156 @@ class TextComparerApp:
                     self.results_text.insert(tk.END, f"  EnglishText.txt:     <NO PUNCTUATION AT THIS POSITION>\n")
                 self.results_text.insert(tk.END, f"  Reason: {diff_type}\n\n")
 
-
         if not differences_found:
             self.results_text.insert(tk.END, "No differences found in the sequence of punctuation marks.\n")
 
         if len(puncts_bilingual) != len(puncts_english):
             self.results_text.insert(tk.END, f"(Note: Punctuation counts differ - Bilingual Extract: {len(puncts_bilingual)}, EnglishText: {len(puncts_english)})\n")
-        elif not differences_found: # only if counts match and no diffs
+        elif not differences_found:
              self.results_text.insert(tk.END, f"(Punctuation counts match: {len(puncts_bilingual)})\n")
+
+    def _tag_paragraphs(self):
+        self.results_text.delete('1.0', tk.END)
+        bilingual_path = self.bilingual_file_path.get()
+        english_path = self.english_file_path.get()
+
+        if not bilingual_path or not english_path:
+            messagebox.showwarning("Input Missing", "Please select both text files for paragraph tagging.")
+            return
+
+        try:
+            with open(bilingual_path, 'r', encoding='utf-8') as f:
+                bilingual_lines_raw = f.readlines() # Keep original newlines
+            with open(english_path, 'r', encoding='utf-8') as f:
+                english_content_full = f.read()
+        except Exception as e:
+            error_msg = f"Error reading files: {e}"
+            self.results_text.insert(tk.END, f"ERROR: {error_msg}\n")
+            messagebox.showerror("File Error", error_msg)
+            return
+
+        # Step 1: Identify "English sentences" from BilingualText.txt by their original indices.
+        potential_content_lines_info = []
+        for original_idx, line_text in enumerate(bilingual_lines_raw):
+            if line_text.strip(): 
+                potential_content_lines_info.append({
+                    "text_content_no_newline": line_text.rstrip('\n'), 
+                    "original_full_line_text": line_text,              
+                    "original_idx": original_idx                       
+                })
+
+        identified_bilingual_eng_lines_info = []
+        for i in range(0, len(potential_content_lines_info), 2):
+            identified_bilingual_eng_lines_info.append(potential_content_lines_info[i])
+
+        # Step 2: Determine which of these English lines need a <paragraph> tag before them.
+        original_indices_of_lines_to_pre_tag = set()
+        for eng_line_info in identified_bilingual_eng_lines_info:
+            sentence_to_search = eng_line_info["text_content_no_newline"].strip()
+
+            if not sentence_to_search: 
+                continue
+            
+            current_search_pos_in_eng_text = 0
+            found_at_line_start_in_eng_text = False
+            while True:
+                idx_in_english_text = english_content_full.find(sentence_to_search, current_search_pos_in_eng_text)
+                if idx_in_english_text == -1: 
+                    break
+                if idx_in_english_text == 0 or \
+                   (idx_in_english_text > 0 and english_content_full[idx_in_english_text - 1] == '\n'):
+                    found_at_line_start_in_eng_text = True
+                    break 
+                current_search_pos_in_eng_text = idx_in_english_text + 1 
+
+            if found_at_line_start_in_eng_text:
+                original_indices_of_lines_to_pre_tag.add(eng_line_info["original_idx"])
+
+        # Step 3: Construct the new bilingual text content with tags
+        output_lines_for_taged_file = []
+        for original_idx, original_line_text in enumerate(bilingual_lines_raw):
+            if original_idx in original_indices_of_lines_to_pre_tag:
+                output_lines_for_taged_file.append("<paragraph>\n")
+            output_lines_for_taged_file.append(original_line_text)
+        
+        # Step 4: Write to the output file "TagedBilingualText.txt"
+        output_filename = "TagedBilingualText.txt"
+        output_dir = os.path.dirname(bilingual_path) if bilingual_path and os.path.dirname(bilingual_path) else os.getcwd()
+        output_filepath = os.path.join(output_dir, output_filename)
+
+        # MODIFIED SECTION STARTS HERE
+        try:
+            with open(output_filepath, 'w', encoding='utf-8') as f:
+                f.writelines(output_lines_for_taged_file)
+            
+            num_tags_added = len(original_indices_of_lines_to_pre_tag)
+            
+            log_message = f"Paragraph tagging complete.\n"
+            log_message += f"Tagged file saved as: {output_filepath}\n"
+            log_message += f"Number of <paragraph> tags added: {num_tags_added}\n"
+            
+            if num_tags_added == 0:
+                 log_message += "(No English sentences from BilingualText.txt (matching criteria) were found at the start of lines in EnglishText.txt to warrant tagging.)\n"
+            
+            # --- Confirmation part ---
+            # Count non-blank lines in EnglishText.txt (using english_content_full read earlier)
+            english_lines_in_file = english_content_full.splitlines() # Use splitlines() for consistency
+            num_non_blank_lines_in_english_text = sum(1 for line in english_lines_in_file if line.strip())
+
+            log_message += "\n--- Confirmation Check ---\n"
+            log_message += f"Number of <paragraph> tags added (based on current logic): {num_tags_added}\n"
+            log_message += f"Number of non-blank text lines in EnglishText.txt: {num_non_blank_lines_in_english_text}\n"
+            
+            comparison_message_for_popup = ""
+            if num_tags_added == num_non_blank_lines_in_english_text:
+                log_message += "Result: Counts match. This aligns with the confirmation criterion that these two numbers should be the same.\n"
+                comparison_message_for_popup = "Counts match."
+            else:
+                log_message += "Result: Counts DO NOT match the confirmation criterion.\n"
+                log_message += "This discrepancy occurs because the tagging logic (adding a tag if an English sentence from BilingualText.txt is found starting a line in EnglishText.txt) "
+                log_message += "does not necessarily result in one tag for every non-blank line in EnglishText.txt.\n"
+                log_message += "Potential reasons for mismatch include:\n"
+                log_message += "  1. Not all non-blank lines in EnglishText.txt correspond to English sentences that are present in (and extracted from) BilingualText.txt.\n"
+                log_message += "  2. English sentences from BilingualText.txt, even if present in EnglishText.txt, might not all start new lines there (and thus wouldn't be tagged by current rules).\n"
+                log_message += "  3. The number of English segments in BilingualText.txt that meet all tagging criteria simply differs from the total count of non-blank lines in EnglishText.txt.\n"
+                comparison_message_for_popup = "Counts DO NOT match. See log for details."
+            # --- End of Confirmation part ---
+            
+            self.results_text.insert(tk.END, log_message)
+            
+            
+        except Exception as e:
+            error_msg = f"Could not write tagged file to {output_filepath}: {e}"
+            self.results_text.insert(tk.END, f"ERROR: {error_msg}\n")
+            messagebox.showerror("File Write Error", error_msg)
+        # MODIFIED SECTION ENDS HERE
 
 
 if __name__ == "__main__":
-    # Create dummy files for testing
-    bilingual_test_content = """Hello, world!
-中文
-This is a test?
-中文
-How are you;
-"""
-    # EnglishText.txt will have different punctuation
-    english_test_content = """Hello world.
-This is a test!
-How are you: I am fine.
-"""
-    # Expected Punctuation (Bilingual Extracted):
-    # Line 1: Hello, world! -> (',', 1, 6), ('!', 1, 12)
-    # Line 2: This is a test? -> ('?', 2, 16)
-    # Line 3: How are you; -> (';', 3, 12)
-    # Bilingual Puncts: [ (',',1,6), ('!',1,12), ('?',2,16), (';',3,12) ]
+    # Create dummy files for testing all features, including paragraph tagging
+    bilingual_test_content = """This is the first sentence.
+Ceci est la première phrase.
+This is the second sentence.
+Ceci est la deuxième phrase.
 
-    # Expected Punctuation (EnglishText.txt):
-    # Line 1: Hello world. -> ('.', 1, 12)
-    # Line 2: This is a test! -> ('!', 2, 16)
-    # Line 3: How are you: I am fine. -> (':', 3, 12), ('.', 3, 23)
-    # English Puncts: [ ('.',1,12), ('!',2,16), (':',3,12), ('.',3,23) ]
+This sentence starts a paragraph in English text.
+Cette phrase commence un paragraphe dans le texte anglais.
+Another sentence here.
+Une autre phrase ici.
+  Spaced sentence.  
+  Phrase espacée.  
+This sentence also starts a paragraph.
+Cette phrase commence aussi un paragraphe.
+Final English line with no pair.
+"""
+    english_test_content = """Some introductory text.
+This is the first sentence, but not at the start.
+This is the second sentence, also not at the start.
+This sentence starts a paragraph in English text. And it continues.
+Some other text. Spaced sentence. here.
+This sentence also starts a paragraph.
+And a final line.
+"""
 
     if not os.path.exists("BilingualText.txt"):
         with open("BilingualText.txt", "w", encoding="utf-8") as f:
