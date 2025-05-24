@@ -46,12 +46,25 @@ class TextComparerApp:
         bilingual_default = "BilingualText.txt"
         english_default = "EnglishText.txt"
 
-        if os.path.exists(bilingual_default):
+        # Prefer subfolder test files if they exist
+        test_folder_name = "TestTaggingFolder"
+        bilingual_test_file_path_sub = os.path.join(test_folder_name, "BilingualText.txt")
+        english_test_file_path_sub = os.path.join(test_folder_name, "EnglishText.txt")
+
+        if os.path.exists(bilingual_test_file_path_sub):
+            self.bilingual_file_path.set(os.path.abspath(bilingual_test_file_path_sub))
+            self.bilingual_label.config(text=f"Bilingual: {os.path.basename(bilingual_test_file_path_sub)} (in {test_folder_name})")
+        elif os.path.exists(bilingual_default):
             self.bilingual_file_path.set(os.path.abspath(bilingual_default))
             self.bilingual_label.config(text=f"Bilingual: {os.path.basename(bilingual_default)}")
-        if os.path.exists(english_default):
+        
+        if os.path.exists(english_test_file_path_sub):
+            self.english_file_path.set(os.path.abspath(english_test_file_path_sub))
+            self.english_label.config(text=f"English: {os.path.basename(english_test_file_path_sub)} (in {test_folder_name})")
+        elif os.path.exists(english_default):
             self.english_file_path.set(os.path.abspath(english_default))
             self.english_label.config(text=f"English: {os.path.basename(english_default)}")
+
 
     def _select_bilingual_file(self):
         filepath = filedialog.askopenfilename(
@@ -240,190 +253,223 @@ class TextComparerApp:
         elif not differences_found:
              self.results_text.insert(tk.END, f"(Punctuation counts match: {len(puncts_bilingual)})\n")
 
-    # --- Helper methods for the new _tag_paragraphs ---
     def _count_words(self, text_line):
-        """Counts words in a line, considering simple space splitting."""
         return len(text_line.strip().split())
 
     def _get_last_word(self, text_line):
-        """Gets the last word from a line. Returns empty string if no words."""
         words = text_line.strip().split()
-        # Basic punctuation removal for the last word comparison
         if words:
             last_word = words[-1]
-            # Remove common trailing punctuation for a more robust comparison
-            # You might want to expand this list or use a regex for more complex cases
             last_word_cleaned = last_word.rstrip(string.punctuation)
             return last_word_cleaned
         return ""
 
-    # --- NEW _tag_paragraphs METHOD ---
     def _tag_paragraphs(self):
         self.results_text.delete('1.0', tk.END)
-        log_messages = ["Starting paragraph tagging with new method...\n"]
+        detailed_log_messages = ["Starting paragraph tagging process...\n"]
 
-        bilingual_path = self.bilingual_file_path.get()
-        english_path = self.english_file_path.get()
+        bilingual_input_path = self.bilingual_file_path.get()
+        english_ref_path = self.english_file_path.get()
 
-        if not bilingual_path or not english_path:
+        if not bilingual_input_path or not english_ref_path:
+            error_msg = "ERROR: Input files missing. Please select both bilingual and English text files.\n"
+            self.results_text.insert(tk.END, error_msg) # Show error directly
             messagebox.showwarning("Input Missing", "Please select both text files for paragraph tagging.")
-            self.results_text.insert(tk.END, "ERROR: Input files missing.\n")
             return
 
         try:
-            with open(bilingual_path, 'r', encoding='utf-8') as f:
-                bilingual_lines_raw = f.readlines() # Keep original newlines
-            with open(english_path, 'r', encoding='utf-8') as f:
+            with open(bilingual_input_path, 'r', encoding='utf-8') as f:
+                bilingual_lines_raw = f.readlines()
+            with open(english_ref_path, 'r', encoding='utf-8') as f:
                 english_ref_lines_raw = f.readlines()
         except Exception as e:
             error_msg = f"Error reading files: {e}"
-            self.results_text.insert(tk.END, f"ERROR: {error_msg}\n")
+            self.results_text.insert(tk.END, f"CRITICAL ERROR: {error_msg}\n") # Show error directly
             messagebox.showerror("File Error", error_msg)
             return
 
-        # --- Step 1: Prepare English reference paragraphs ---
         english_ref_paragraphs_info = []
         for line_num, line_text in enumerate(english_ref_lines_raw):
             text = line_text.strip()
-            if not text: # Skip blank lines
-                continue
+            if not text: continue
             word_count = self._count_words(text)
-            last_word = self._get_last_word(text) # Uses cleaned last word
-            if word_count > 0: # Only consider non-empty lines as paragraphs
+            last_word = self._get_last_word(text)
+            if word_count > 0:
                 english_ref_paragraphs_info.append({
-                    "text": text,
-                    "word_count": word_count,
-                    "last_word": last_word,
-                    "original_line_num": line_num + 1
+                    "text": text, "word_count": word_count,
+                    "last_word": last_word, "original_line_num": line_num + 1
                 })
-        log_messages.append(f"Processed {len(english_ref_paragraphs_info)} non-blank paragraphs from English reference file.\n")
+        # This info is now part of the detailed log, not the matching summary directly
+        # detailed_log_messages.append(f"Processed {len(english_ref_paragraphs_info)} non-blank paragraphs from English reference file.\n")
 
-        # --- Step 2: Identify potential English lines from BilingualText.txt ---
-        # This part assumes English is every other non-blank line in bilingual.
         potential_bilingual_content_lines_info = []
         for original_idx, line_text in enumerate(bilingual_lines_raw):
-            if line_text.strip(): # Only consider non-blank lines
+            if line_text.strip():
                 potential_bilingual_content_lines_info.append({
                     "text_content_no_newline": line_text.rstrip('\n'),
-                    "original_full_line_text": line_text,
-                    "original_idx": original_idx
+                    "original_full_line_text": line_text, "original_idx": original_idx
                 })
 
         bilingual_eng_lines_with_info = []
-        # Assumption: English lines are at even indices (0, 2, 4...) of the *non-blank* lines
-        # from the bilingual file.
-        for i in range(0, len(potential_bilingual_content_lines_info), 2): 
+        for i in range(0, len(potential_bilingual_content_lines_info), 2):
             bilingual_eng_lines_with_info.append(potential_bilingual_content_lines_info[i])
 
         if not bilingual_eng_lines_with_info:
-            log_messages.append("WARNING: No potential English lines identified in the bilingual file based on the 'every other non-blank line' rule.\n")
-            self.results_text.insert(tk.END, "".join(log_messages))
-            messagebox.showwarning("Processing Issue", "No English lines identified in bilingual file.")
-            return
-        log_messages.append(f"Identified {len(bilingual_eng_lines_with_info)} potential English lines from bilingual file.\n")
+            detailed_log_messages.append("WARNING: No potential English lines identified in the bilingual file based on 'every other non-blank line' rule.\n")
+        else:
+            detailed_log_messages.append(f"Identified {len(bilingual_eng_lines_with_info)} potential English lines from bilingual file.\n")
 
+        bilingual_filename_itself = os.path.basename(bilingual_input_path)
+        containing_folder_path = os.path.dirname(bilingual_input_path)
+        normalized_containing_folder_path = os.path.normpath(containing_folder_path)
+        folder_name_for_output_file_base = os.path.basename(normalized_containing_folder_path)
+        
+        is_special_case_for_naming = False
+        if not folder_name_for_output_file_base or folder_name_for_output_file_base == ".":
+            is_special_case_for_naming = True
+        elif os.name == 'nt' and len(folder_name_for_output_file_base) == 2 and \
+             folder_name_for_output_file_base[1] == ':' and folder_name_for_output_file_base[0].isalpha():
+            is_special_case_for_naming = True
+        elif os.name != 'nt' and folder_name_for_output_file_base == os.sep: # For root path like '/'
+            is_special_case_for_naming = True
 
-        # --- Step 3: Match English reference paragraphs to bilingual English blocks ---
+        if is_special_case_for_naming:
+            bilingual_file_name_base, _ = os.path.splitext(bilingual_filename_itself)
+            output_file_basename = bilingual_file_name_base + "_Tagged"
+            detailed_log_messages.append(
+                f"INFO: Bilingual file's containing folder is root, CWD, or ambiguous. Using fallback output name: {output_file_basename}.txt\n"
+            )
+        else:
+            output_file_basename = folder_name_for_output_file_base
+        
+        output_filename = output_file_basename + ".txt"
+        output_dir = containing_folder_path if containing_folder_path else os.getcwd()
+        output_filepath = os.path.join(output_dir, output_filename)
+        # This info is also part of the detailed log
+        # detailed_log_messages.append(f"INFO: Target output file path set to: {output_filepath}\n")
+
         original_indices_of_lines_to_pre_tag = set()
-        bilingual_search_start_idx = 0 
+        bilingual_search_start_idx = 0
         num_successful_matches = 0
         num_last_word_mismatches_for_wc_match = 0
         num_unmatched_ref_paras = 0
 
-        log_messages.append("\n--- Matching Process ---\n")
-
+        detailed_log_messages.append("\n--- Matching Process ---\n")
         for ref_para_idx, ref_para_info in enumerate(english_ref_paragraphs_info):
             ref_wc = ref_para_info["word_count"]
-            ref_lw_cleaned = ref_para_info["last_word"] # Already cleaned by _get_last_word
-            log_messages.append(f"Attempting to match Ref Para {ref_para_idx + 1} (Line {ref_para_info['original_line_num']}, WC: {ref_wc}, Cleaned LW: '{ref_lw_cleaned}')\n")
+            ref_lw_cleaned = ref_para_info["last_word"]
+            detailed_log_messages.append(f"Attempting to match Ref Para {ref_para_idx + 1} (Line {ref_para_info['original_line_num']}, WC: {ref_wc}, Cleaned LW: '{ref_lw_cleaned}')\n")
 
             found_match_for_this_ref_para = False
-            for i in range(bilingual_search_start_idx, len(bilingual_eng_lines_with_info)):
-                current_block_word_count = 0
-                current_block_lines_info = [] 
+            if bilingual_eng_lines_with_info:
+                for i in range(bilingual_search_start_idx, len(bilingual_eng_lines_with_info)):
+                    current_block_word_count = 0
+                    current_block_lines_info = []
+                    for j in range(i, len(bilingual_eng_lines_with_info)):
+                        bili_eng_line_info = bilingual_eng_lines_with_info[j]
+                        line_text_no_newline = bili_eng_line_info["text_content_no_newline"]
+                        line_word_count = self._count_words(line_text_no_newline)
 
-                for j in range(i, len(bilingual_eng_lines_with_info)):
-                    bili_eng_line_info = bilingual_eng_lines_with_info[j]
-                    line_text_no_newline = bili_eng_line_info["text_content_no_newline"]
-                    line_word_count = self._count_words(line_text_no_newline)
+                        if current_block_word_count + line_word_count > ref_wc: break
+                        current_block_word_count += line_word_count
+                        current_block_lines_info.append(bili_eng_line_info)
 
-                    if current_block_word_count + line_word_count > ref_wc:
-                        break 
-
-                    current_block_word_count += line_word_count
-                    current_block_lines_info.append(bili_eng_line_info)
-
-                    if current_block_word_count == ref_wc:
-                        block_last_line_text = current_block_lines_info[-1]["text_content_no_newline"]
-                        block_last_word_cleaned = self._get_last_word(block_last_line_text) # Cleaned
-
-                        if block_last_word_cleaned.lower() == ref_lw_cleaned.lower(): # Case-insensitive compare of cleaned words
-                            first_line_original_idx = current_block_lines_info[0]["original_idx"]
-                            original_indices_of_lines_to_pre_tag.add(first_line_original_idx)
-                            num_successful_matches += 1
-                            bilingual_search_start_idx = j + 1 
-                            found_match_for_this_ref_para = True
-                            log_messages.append(f"  MATCHED: Bilingual block (Original lines {current_block_lines_info[0]['original_idx']+1} to {bili_eng_line_info['original_idx']+1}) WC: {current_block_word_count}, Cleaned LW: '{block_last_word_cleaned}'.\n")
-                            break 
-                        else:
-                            num_last_word_mismatches_for_wc_match +=1
-                            log_messages.append(f"  LAST WORD MISMATCH: Ref Para (Cleaned LW: '{ref_lw_cleaned}') vs Bilingual block ending with cleaned LW '{block_last_word_cleaned}' (Original last line idx: {bili_eng_line_info['original_idx']+1}). Word counts ({ref_wc}) matched. This block not chosen.\n")
-                            # This specific block (ending at j) is not a match.
-                            # The i loop will try the next starting point for the block.
-                            # We don't break j here, as the block was exactly ref_wc.
-                            # The next iteration of j (if any) would make it too long anyway.
-                            # The key is that found_match_for_this_ref_para is NOT set to True.
-                            pass
-                
-                if found_match_for_this_ref_para:
-                    break 
-
+                        if current_block_word_count == ref_wc:
+                            block_last_line_text = current_block_lines_info[-1]["text_content_no_newline"]
+                            block_last_word_cleaned = self._get_last_word(block_last_line_text)
+                            if block_last_word_cleaned.lower() == ref_lw_cleaned.lower():
+                                first_line_original_idx = current_block_lines_info[0]["original_idx"]
+                                original_indices_of_lines_to_pre_tag.add(first_line_original_idx)
+                                num_successful_matches += 1
+                                bilingual_search_start_idx = j + 1
+                                found_match_for_this_ref_para = True
+                                detailed_log_messages.append(f"  MATCHED: Bilingual block (Original lines {current_block_lines_info[0]['original_idx']+1} to {bili_eng_line_info['original_idx']+1}) WC: {current_block_word_count}, Cleaned LW: '{block_last_word_cleaned}'.\n")
+                                break
+                            else:
+                                num_last_word_mismatches_for_wc_match +=1
+                                detailed_log_messages.append(f"  LAST WORD MISMATCH: Ref Para (Cleaned LW: '{ref_lw_cleaned}') vs Bilingual block (Cleaned LW '{block_last_word_cleaned}', Original last line idx: {bili_eng_line_info['original_idx']+1}). WC ({ref_wc}) matched. Block not chosen.\n")
+                    if found_match_for_this_ref_para: break
+            
             if not found_match_for_this_ref_para:
                 num_unmatched_ref_paras +=1
-                log_messages.append(f"  NO MATCH FOUND for Ref Para {ref_para_idx + 1} in remaining bilingual text.\n")
+                detailed_log_messages.append(f"  NO MATCH FOUND for Ref Para {ref_para_idx + 1} in remaining bilingual text.\n")
         
-        log_messages.append("\n--- Summary of Matching ---\n")
-        log_messages.append(f"Total English reference paragraphs processed: {len(english_ref_paragraphs_info)}\n")
-        log_messages.append(f"Successfully matched and tagged: {num_successful_matches}\n")
-        log_messages.append(f"Reference paragraphs where word count matched a block, but cleaned last word did not: {num_last_word_mismatches_for_wc_match} (these were not tagged)\n")
-        log_messages.append(f"Reference paragraphs for which no suitable block was found: {num_unmatched_ref_paras}\n")
+        detailed_log_messages.append("--- Matching Process Complete ---\n\n")
 
-
-        # --- Step 4: Construct the new bilingual text content with tags ---
         output_lines_for_tagged_file = []
         for original_idx, original_line_text in enumerate(bilingual_lines_raw):
             if original_idx in original_indices_of_lines_to_pre_tag:
                 output_lines_for_tagged_file.append("<paragraph>\n")
             output_lines_for_tagged_file.append(original_line_text)
+        num_tags_added = len(original_indices_of_lines_to_pre_tag)
 
-        # --- Step 5: Write to the output file "TagedBilingualText.txt" ---
-        output_filename = "TagedBilingualText.txt"
-        output_dir = os.path.dirname(bilingual_path) if bilingual_path and os.path.dirname(bilingual_path) else os.getcwd()
-        output_filepath = os.path.join(output_dir, output_filename)
+        # --- Assemble and Display Summaries and Logs ---
+        overall_summary_lines = []
+        matching_summary_lines = []
+        detailed_log_header = []
 
         try:
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 f.writelines(output_lines_for_tagged_file)
 
-            num_tags_added = len(original_indices_of_lines_to_pre_tag)
-            log_messages.append(f"\nParagraph tagging complete.\n")
-            log_messages.append(f"Tagged file saved as: {output_filepath}\n")
-            log_messages.append(f"Number of <paragraph> tags added: {num_tags_added}\n")
+            # 1. Overall Operation Summary
+            op_summary_title = "Tagging Operation Summary:"
+            op_summary_sep = "-" * len(op_summary_title)
+            overall_summary_lines.extend([
+                f"{op_summary_title}\n",
+                f"{op_summary_sep}\n",
+                f"Output File: {output_filepath}\n",
+                f"Number of <paragraph> tags added: {num_tags_added}\n",
+                f"{op_summary_sep}\n\n"
+            ])
 
-            if num_tags_added == 0 and len(english_ref_paragraphs_info) > 0:
-                log_messages.append("(No English paragraphs from the reference file could be matched to blocks in the bilingual file according to the specified criteria.)\n")
+            # 2. Summary of Matching
+            match_summary_title = "Summary of Matching:"
+            match_summary_sep = "-" * len(match_summary_title)
+            matching_summary_lines.extend([
+                f"{match_summary_title}\n",
+                f"{match_summary_sep}\n",
+                f"Total English reference paragraphs processed: {len(english_ref_paragraphs_info)}\n",
+                f"Successfully matched and tagged: {num_successful_matches}\n",
+            ])
+            if num_last_word_mismatches_for_wc_match > 0:
+                matching_summary_lines.append(
+                    f"Word count matches with last word mismatch (not tagged): {num_last_word_mismatches_for_wc_match}\n"
+                )
+            if num_unmatched_ref_paras > 0:
+                matching_summary_lines.append(
+                    f"Reference paragraphs with no suitable block found: {num_unmatched_ref_paras}\n"
+                )
+            if num_tags_added == 0 and len(english_ref_paragraphs_info) > 0 and num_successful_matches == 0:
+                matching_summary_lines.append(
+                    "(No English paragraphs from the reference file could be matched and tagged based on criteria.)\n"
+                )
+            matching_summary_lines.append(f"{match_summary_sep}\n\n")
 
-            self.results_text.insert(tk.END, "".join(log_messages))
+            # 3. Detailed Log Header
+            log_header_title = "Detailed Log:"
+            log_header_sep = "-" * len(log_header_title)
+            detailed_log_header.extend([
+                f"{log_header_title}\n",
+                f"{log_header_sep}\n"
+            ])
+            
+            # Insert into ScrolledText in desired order
+            self.results_text.insert('1.0', "".join(overall_summary_lines))
+            self.results_text.insert(tk.END, "".join(matching_summary_lines))
+            self.results_text.insert(tk.END, "".join(detailed_log_header))
+            self.results_text.insert(tk.END, "".join(detailed_log_messages)) # The actual step-by-step log
+            
             if num_successful_matches > 0 :
-                 messagebox.showinfo("Success", f"Tagging complete. {num_tags_added} tags added. See results log. Output: {output_filepath}")
+                 messagebox.showinfo("Success", f"Tagging complete. {num_tags_added} tags added. Output: {output_filepath}\nSee log for details.")
             else:
-                 messagebox.showwarning("Tagging Complete (No Matches)", f"Tagging process ran, but no matches found. {num_tags_added} tags added. See results log. Output: {output_filepath}")
-
+                 messagebox.showwarning("Tagging Complete (Potential Issues)", f"Tagging process ran. {num_tags_added} tags added. Output: {output_filepath}\nReview 'Summary of Matching' and 'Detailed Log' for details.")
 
         except Exception as e:
             error_msg = f"Could not write tagged file to {output_filepath}: {e}"
-            log_messages.append(f"ERROR: {error_msg}\n")
-            self.results_text.insert(tk.END, "".join(log_messages))
+            # Display error prominently if file write fails
+            self.results_text.insert('1.0', f"CRITICAL FILE WRITE ERROR: {error_msg}\n{'-'*20}\n\n")
+            self.results_text.insert(tk.END, "".join(detailed_log_messages))
             messagebox.showerror("File Write Error", error_msg)
 
 
@@ -442,27 +488,39 @@ Un court.
 Another final English sentence.
 Une autre dernière phrase anglaise.
 """
-    # EnglishText.txt:
-    # Para 1: "This is an English sentence. It has seven words in total." (12 words, last word "total")
-    # Para 2: "This should be the start of another paragraph. And this continues it, having ten words combined." (19 words, last word "combined")
-    # Para 3: "A short one." (3 words, last word "one")
-    # Para 4: "A different paragraph not matching bilingual exactly." (6 words, last word "exactly")
-
     english_test_content = """This is an English sentence. It has seven words in total.
 This should be the start of another paragraph. And this continues it, having ten words combined.
 A short one.
 A different paragraph not matching bilingual exactly.
 """
 
-    if not os.path.exists("BilingualText.txt"):
-        with open("BilingualText.txt", "w", encoding="utf-8") as f:
-            f.write(bilingual_test_content)
+    test_folder_name = "TestTaggingFolder"
+    if not os.path.exists(test_folder_name):
+        os.makedirs(test_folder_name)
 
-    if not os.path.exists("EnglishText.txt"):
-        with open("EnglishText.txt", "w", encoding="utf-8") as f:
+    bilingual_test_file_path = os.path.join(test_folder_name, "BilingualText.txt")
+    english_test_file_path = os.path.join(test_folder_name, "EnglishText.txt")
+
+    if not os.path.exists(bilingual_test_file_path):
+        with open(bilingual_test_file_path, "w", encoding="utf-8") as f:
+            f.write(bilingual_test_content)
+        print(f"Created dummy file: {bilingual_test_file_path}")
+
+    if not os.path.exists(english_test_file_path):
+        with open(english_test_file_path, "w", encoding="utf-8") as f:
             f.write(english_test_content)
+        print(f"Created dummy file: {english_test_file_path}")
+
+    if not os.path.exists("BilingualText_CWD.txt"):
+         with open("BilingualText_CWD.txt", "w", encoding="utf-8") as f:
+            f.write("English line in CWD.\nFrench line in CWD.")
+         print("Created dummy file: BilingualText_CWD.txt")
+    if not os.path.exists("EnglishText_CWD.txt"):
+         with open("EnglishText_CWD.txt", "w", encoding="utf-8") as f:
+            f.write("English line in CWD.")
+         print("Created dummy file: EnglishText_CWD.txt")
 
     root = tk.Tk()
     app = TextComparerApp(root)
-    # app._preload_file_paths() # _preload_file_paths is called in __init__
+    # _preload_file_paths is called in __init__, which now prefers the subfolder test files
     root.mainloop()
